@@ -41,19 +41,24 @@ class RWKVWeatherDataset(Dataset):
         """
             这里暂时返回整个对应索引的数据，后续需要完善。
         """
-
         s = random.randrange(0,self.max_len-2*self.seq_len) ###
-
-        input_data = self.chunks[:, s:s+self.seq_len, :, :]
-        target_data = self.chunks[:, s+self.seq_len:s+self.seq_len+self.output_len, :, :]
+        input_points = []
+        target = []
+        for num_chunk in range(len(self.chunks)):
+            s = random.randrange(0,self.max_len-2*self.seq_len) 
+            input_data = self.chunks[:, s:s+self.seq_len, :, :]
+            target_data = self.chunks[:, s+self.seq_len:s+self.seq_len+self.output_len, :, :]
+            input_points.append(input_data)
+            target.append(target_data)
 
         sample = {
-            'input': input_data,
-            'target': target_data
+            'input': np.concatenate(input_points, axis=1),
+            'target': np.concatenate(target, axis=1),
         }
 
         return sample
 
     def __len__(self):
 
-        return self.all_data.shape[1] - self.input_len
+        return self.seq_len*len(self.chunks)
+        # return len(self.chunks)
