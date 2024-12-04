@@ -31,6 +31,7 @@ class RWKVWeatherDataset(Dataset):
             end_idx = start_idx + self.max_len
             if end_idx > time_dim_length:
                 end_idx = time_dim_length
+                break
             chunk = temp[:, start_idx:end_idx, :, :]
             self.chunks.append(chunk) # (C, T, H, W)
 
@@ -41,13 +42,13 @@ class RWKVWeatherDataset(Dataset):
         """
             这里暂时返回整个对应索引的数据，后续需要完善。
         """
-        s = random.randrange(0,self.max_len-2*self.seq_len) ###
+        s = random.randrange(0,self.max_len-3*self.seq_len) ###
         input_points = []
         target = []
-        for num_chunk in range(len(self.chunks)):
+        for chunk in self.chunks:
             s = random.randrange(0,self.max_len-2*self.seq_len) 
-            input_data = self.chunks[:, s:s+self.seq_len, :, :]
-            target_data = self.chunks[:, s+self.seq_len:s+self.seq_len+self.output_len, :, :]
+            input_data = chunk[:, s:s+self.seq_len, :, :]
+            target_data = chunk[:, s+self.seq_len:s+self.seq_len+self.output_len, :, :]
             input_points.append(input_data)
             target.append(target_data)
 
