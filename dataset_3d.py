@@ -11,6 +11,7 @@ class RWKVWeatherDataset(Dataset):
     def __init__(self, data_path,seq_len=10,max_len=50,output_len=10,flag='train',split=0.8):
 
         assert seq_len <= max_len//2 
+        assert seq_len == output_len
         assert flag in ['train', 'val']
         assert split >= 0 and split <=1.0
         self.path = data_path
@@ -63,14 +64,14 @@ class RWKVWeatherDataset(Dataset):
             input_points.append(input_data)
             target.append(target_data)
 
-        sample = {
-            'input': np.concatenate(input_points, axis=1),
-            'target': np.concatenate(target, axis=1),
-        }
         # sample = {
-        #     'input': np.array(input_points),
-        #     'target': np.array(target),
+        #     'input': np.concatenate(input_points, axis=1),
+        #     'target': np.concatenate(target, axis=1),
         # }
+        sample = {
+            'input': np.array(input_points)[idx],
+            'target': np.array(target)[idx],
+        }
         return sample
 
     def __len__(self):
