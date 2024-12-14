@@ -8,7 +8,7 @@ from tqdm import tqdm
 import random
 
 class RWKVWeatherDataset(Dataset):
-    def __init__(self, data_path,seq_len=10,max_len=50,output_len=1,flag='train',split=0.8):
+    def __init__(self, data_path,seq_len=10,max_len=50,output_len=10,flag='train',split=0.8):
 
         assert seq_len <= max_len//2 
         assert seq_len >= output_len
@@ -32,7 +32,7 @@ class RWKVWeatherDataset(Dataset):
         temp = []
         for data_name in data_raw.data_vars:
             if data_name != 'sst':
-                temp.append(data_raw[data_name][:,:176,:156].values)
+                temp.append(data_raw[data_name][:,:120,:120].values)
 
         temp = np.stack(temp, axis=0) # (C, T, H, W)
 
