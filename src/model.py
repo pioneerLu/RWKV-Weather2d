@@ -269,9 +269,10 @@ class L2Wrap(torch.autograd.Function):
 
 
 class RWKV_Layer(pl.LightningModule):
-    def __init__(self, args):
+    def __init__(self, args,flag=True):
         super().__init__()
         self.args = args
+        self.flag = flag
         self.emb = nn.Embedding(args.vocab_size, args.n_embd)
         self.blocks = nn.ModuleList([Block(args, i) for i in range(args.n_layer)])
         # print(args.n_layer)
@@ -309,7 +310,8 @@ class RWKV_Layer(pl.LightningModule):
 
         x = self.ln_out(x)
 
-        x = self.head(x)
+        if self.flag:
+            x = self.head(x)
 
         return x
 
@@ -337,7 +339,7 @@ class DownSample(nn.Module):
             dim (int): Input channel dimension
         """
         super().__init__()
-        self.conv_down = nn.Conv3d(4 * dim, 2 * dim, kernel_size=1, stride=1, padding=0) 
+        self.conv_down = nn.Conv3d(4 * dim, dim, kernel_size=1, stride=1, padding=0) 
         self.norm = nn.LayerNorm(4 * dim) 
 
     def forward(self, x, T, H, W):
@@ -351,6 +353,7 @@ class DownSample(nn.Module):
         # x: [B, T*H*W, dim] -> [B, T, H, W, dim]
         print(x.shape)
         x = x.reshape(x.shape[0], T, H//2, W//2, -1)
+        print(x.shape)
         x = self.norm(x)
         # Reshape to [B, dim, T, H, W] for Conv3d
         x = x.permute(0, 4, 1, 2, 3)
@@ -361,7 +364,7 @@ class DownSample(nn.Module):
 class UpSample(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        self.conv_up = nn.Conv3d(2 * dim, 4 * dim, kernel_size=1, stride=1, padding=0)  
+        self.conv_up = nn.Conv3d(dim, 4 * dim, kernel_size=1, stride=1, padding=0)  
         self.norm = nn.LayerNorm(4 * dim)  
 
     def forward(self, x, T, H, W):
@@ -432,19 +435,39 @@ class RWKV_Weather(pl.LightningModule):
         super().__init__()
         self.args = args
         self.layer1 = RWKV_Layer(args)
-        self.layer2 = RWKV_Layer(args)
-        self.layer3 = RWKV_Layer(args)
+        self.layer2 = RWKV_Layer(args,flag=False)
+        self.layer3 = RWKV_Layer(args,flag=False)
         self.layer4 = RWKV_Layer(args)
-        
+        self.transform_shape1 = nn.Linear(args.vocab_size,args.n_embd)
+        self.transform_shape2 = nn.Linear(args.vocab_size,args.n_embd)
         self.downsample = DownSample(args.n_embd)
         self.upsample = UpSample(args.n_embd)
         self.patch_embed = PatchEmbedding3D(5,args.n_embd,(2,4,4))###
         self.patch_reovery = PatchRecovery3D(5, args.n_embd,(2,4,4))###
+        
         if args.load_model:
             self.load_rwkv_from_pretrained(args.load_model)
 
     def load_rwkv_from_pretrained(self, path):
         self.rwkv.load_state_dict(torch.load(path, map_location="cpu"))
+
+    @property
+    def deepspeed_offload(self) -> bool:
+        strategy = self.trainer.strategy
+        if isinstance(strategy, DeepSpeedStrategy):
+            cfg = strategy.config["zero_optimization"]
+            return cfg.get("offload_optimizer") or cfg.get("offload_param")
+        return False
+     
+    def configure_optimizers(self):
+        trainable_params = [p for p in self.parameters() if p.requires_grad]
+        name_of_trainable_params = [n for n, p in self.named_parameters() if p.requires_grad]
+        rank_zero_info(f"Name of trainable parameters in optimizers: {name_of_trainable_params}")
+        rank_zero_info(f"Number of trainable parameters in optimizers: {len(trainable_params)}")
+        optim_groups = [{"params": trainable_params, "weight_decay": self.args.weight_decay}]
+        if self.deepspeed_offload:
+            return DeepSpeedCPUAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adamw_mode=True, amsgrad=False)
+        return FusedAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adam_w_mode=True, amsgrad=False)
     
     def forward(self,samples):
         x,y= samples['input'],samples['target']
@@ -453,17 +476,23 @@ class RWKV_Weather(pl.LightningModule):
         x = self.layer1(x)
         print(x.shape)
         skip = x
-
-        x = self.downsample(x,10,30,30)
+        x = self.transform_shape1(x)
+        x = self.downsample(x,5,30,30)
+        print(x.shape)
         x = self.layer2(x)
+        print('layer2',x.shape)
         x= self.layer3(x)
-        x = self.upsample(x,10,15,15)
+        print('layer3',x.shape)
+        print(x.shape)
+        x = self.upsample(x,5,30,30)
         x = self.layer4(x)
         x = x + skip
-        x = self.patch_reovery(x,5,30,30)
+        print(x.shape)
+        x = self.transform_shape2(x)
+        x = self.patch_reovery(x,5,(30,30))
         return x,y
     
-    def weighted_temporal_consistency_loss(predict_frames, target_frames, weights):
+    def weighted_temporal_consistency_loss(self,predict_frames, target_frames, weights):
 
         """
         Args:
@@ -487,9 +516,12 @@ class RWKV_Weather(pl.LightningModule):
     
     def training_step(self, batch, batch_idx):
         outputs, targets = self(batch)  
-
+        try:
+            print(outputs.shape)
+        except:
+            print(outputs)
         loss1 = F.mse_loss(outputs, targets)
-        weights = torch.ones(len(outputs) - 1, device=outputs.device)  ###
+        weights = torch.ones(outputs.shape[2] - 1, device=outputs.device)  ###
         loss2 = self.weighted_temporal_consistency_loss(outputs, targets, weights)###
         loss = loss1 + loss2
 

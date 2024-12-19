@@ -27,7 +27,7 @@ if __name__ == "__main__":
     parser.add_argument("--epoch_begin", default=0, type=int)  # if you load a model trained for x "epochs", set epoch_begin = x
     parser.add_argument("--epoch_save", default=5, type=int)  # save the model every [epoch_save] "epochs"
 
-    parser.add_argument("--micro_bsz", default=12, type=int)  # micro batch size (batch size per GPU)
+    parser.add_argument("--micro_bsz", default=4, type=int)  # micro batch size (batch size per GPU)
     parser.add_argument("--n_layer", default=6, type=int)
     parser.add_argument("--n_embd", default=512, type=int)
     parser.add_argument("--dim_att", default=0, type=int)
@@ -90,6 +90,7 @@ if __name__ == "__main__":
     args.real_bsz = int(args.num_nodes) * int(args.devices) * args.micro_bsz
     os.environ["RWKV_CTXLEN"] = str(args.ctx_len)
     os.environ["RWKV_HEAD_SIZE_A"] = str(args.head_size_a)
+    os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
     if args.dim_att <= 0:
         args.dim_att = args.n_embd
     if args.dim_ffn <= 0:
@@ -171,6 +172,7 @@ if __name__ == "__main__":
 
     from src.model import RWKV_Weather
     model = RWKV_Weather(args)
+    
     if args.model_path:
         msg = model.load_state_dict(torch.load(args.model_path, map_location='cpu'), strict=False)
         rank_zero_info(f"loading time series rwkv model from {args.model_path}: {msg}")
@@ -182,7 +184,7 @@ if __name__ == "__main__":
     logger = CSVLogger("logs", name=args.exp_name)
     trainer = Trainer(max_epochs=args.epoch_count, logger=logger, accelerator='gpu', devices=1, strategy="deepspeed_stage_1", precision='bf16',
                       callbacks=[train_callback(args)], enable_checkpointing=False)
-
+    
     # must set shuffle=False, persistent_workers=False (because worker is in another thread)
     data_loader = DataLoader(train_data, shuffle=False, pin_memory=True, batch_size=args.micro_bsz, num_workers=0, 
                              persistent_workers=False, drop_last=True)
@@ -190,4 +192,5 @@ if __name__ == "__main__":
                            persistent_workers=False, drop_last=True)
 
     trainer.fit(model, data_loader, val_loader)
+
     #trainer.validate(model, val_loader)
