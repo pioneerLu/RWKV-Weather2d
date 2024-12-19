@@ -74,6 +74,7 @@ class WKV_6(torch.autograd.Function):
             gw = torch.empty((B, T, C), device=gy.device, requires_grad=False, dtype=torch.bfloat16, memory_format=torch.contiguous_format)#.uniform_(-100, 100)
             gu = torch.empty((B, C), device=gy.device, requires_grad=False, dtype=torch.bfloat16, memory_format=torch.contiguous_format)#.uniform_(-100, 100)
             wkv6_cuda.backward(B, T, C, H, r, k, v, ew, u, gy, gr, gk, gv, gw, gu)
+            print(gu.type())
             gu = torch.sum(gu, 0).view(H, C//H)
             return (None, None, None, None, gr, gk, gv, gw, gu)
 
@@ -379,11 +380,8 @@ class UpSample(nn.Module):
 
         # Apply 3D convolution
         x = self.conv_up(x)
-
         # Reshape to [B, T, H, W, 4*dim]
         x = x.permute(0, 2, 3, 4, 1)
-
-        # Apply normalization
         x = self.norm(x)
 
         # Reshape back to [B, T*H*W, dim]
@@ -505,8 +503,7 @@ class RWKV_Weather(pl.LightningModule):
         num_frames = predict_frames.shape[2]
 
         assert len(weights) == num_frames - 1
-        
-
+    
         pred_diffs = predict_frames[:, :, 1:] - predict_frames[:, :, :-1]  # [B, C, T-1, H, W]
         target_diffs = target_frames[:, :, 1:] - target_frames[:, :, :-1]  # [B, C, T-1, H, W]
         weights = torch.as_tensor(weights, dtype=torch.float32, device=predict_frames.device).view(1, 1, -1, 1, 1)  # [1, 1, T-1, 1, 1]
@@ -521,9 +518,9 @@ class RWKV_Weather(pl.LightningModule):
         except:
             print(outputs)
         loss1 = F.mse_loss(outputs, targets)
-        weights = torch.ones(outputs.shape[2] - 1, device=outputs.device)  ###
-        loss2 = self.weighted_temporal_consistency_loss(outputs, targets, weights)###
-        loss = loss1 + loss2
+        # weights = torch.ones(outputs.shape[2] - 1, device=outputs.device)  ###
+        # loss2 = self.weighted_temporal_consistency_loss(outputs, targets, weights)###
+        loss = loss1 
 
         self.log("batch_loss", loss, on_step=True, on_epoch=False, prog_bar=True) 
         return {"loss": loss}
