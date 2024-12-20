@@ -539,6 +539,7 @@ class RWKV_Weather(pl.LightningModule):
         outputs, targets = self(batch)
         val_loss = F.mse_loss(outputs, targets)
         self.log("val_loss", val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        
         return {"val_loss": val_loss}
 
     def validation_epoch_end(self, outputs):

@@ -188,6 +188,7 @@ if __name__ == "__main__":
     # must set shuffle=False, persistent_workers=False (because worker is in another thread)
     data_loader = DataLoader(train_data, shuffle=False, pin_memory=True, batch_size=args.micro_bsz, num_workers=0, 
                              persistent_workers=False, drop_last=True)
+    
     val_loader = DataLoader(val_data, shuffle=False, pin_memory=True, batch_size=1, num_workers=0, 
                            persistent_workers=False, drop_last=True)
 
